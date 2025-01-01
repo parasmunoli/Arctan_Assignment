@@ -9,6 +9,7 @@ class AudioProcessor:
         self.channels = 1
         self.audio_interface = pyaudio.PyAudio()
 
+# Function for recording audio
     def recordAudio(self, duration_seconds, output_file):
         """Capture audio from the microphone."""
         stream = self.audio_interface.open(
