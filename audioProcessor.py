@@ -1,52 +1,84 @@
+import numpy as np
 import pyaudio
 import wave
+from dataclasses import dataclass
+from typing import Optional, List, Any
+import queue
+
+@dataclass
+class AudioConfig:
+    """Configuration for audio processing parameters"""
+    chunkSize: int = 4096
+    sampleRate: int = 16000
+    channels: int = 1
+    format: int = pyaudio.paFloat32
+    deviceIndex: Optional[int] = None
 
 class AudioProcessor:
-    def __init__(self, chunk_size=2048, sample_rate=16000):
-        self.chunk_size = chunk_size
-        self.sample_rate = sample_rate
-        self.format = pyaudio.paInt16
-        self.channels = 1
-        self.audio_interface = pyaudio.PyAudio()
+    def __init__(self, config: AudioConfig):
+        self.config = config
+        self.audio = pyaudio.PyAudio()
+        self.stream = None
+        self.isRecording = False
+        self.audioQueue = queue.Queue()
 
-# Function for recording audio
-    def recordAudio(self, duration_seconds, output_file):
-        """Capture audio from the microphone."""
-        stream = self.audio_interface.open(
-            format=self.format,
-            channels=self.channels,
-            rate=self.sample_rate,
+    def startStream(self):
+        """Start the audio stream"""
+        if self.stream is not None:
+            return
+
+        def callback(in_data: bytes, *_: Any) -> tuple[bytes, int]:
+            """
+            Audio stream callback function
+            Args:
+                in_data: Input audio data
+                *_: Unused callback parameters (frame_count, time_info, status)
+            Returns:
+                Tuple of (audio_data, stream_status)
+            """
+            if self.isRecording:
+                audioData = np.frombuffer(in_data, dtype=np.float32)
+                self.audioQueue.put(audioData)
+            return (in_data, pyaudio.paContinue)
+
+        self.stream = self.audio.open(
+            format=self.config.format,
+            channels=self.config.channels,
+            rate=self.config.sampleRate,
             input=True,
-            frames_per_buffer=self.chunk_size
+            frames_per_buffer=self.config.chunkSize,
+            stream_callback=callback
         )
 
-        print(f"Recording for {duration_seconds} seconds...")
-        frames = []
+        self.isRecording = True
+        self.stream.start_stream()
 
-        for _ in range(0, int(self.sample_rate / self.chunk_size * duration_seconds)):
-            data = stream.read(self.chunk_size)
-            frames.append(data)
+    def getLatestChunk(self) -> Optional[np.ndarray]:
+        """Get the latest audio chunk from the queue"""
+        try:
+            return self.audioQueue.get_nowait()
+        except queue.Empty:
+            return None
 
-        print("Recording complete.")
-        stream.stop_stream()
-        stream.close()
+    def stopStream(self):
+        """Stop the audio stream"""
+        self.isRecording = False
+        if self.stream is not None:
+            self.stream.stopStream()
+            self.stream.close()
+            self.stream = None
 
-        # Save to WAV file
-        with wave.open(output_file, 'wb') as wf:
-            wf.setnchannels(self.channels)
-            wf.setsampwidth(self.audio_interface.get_sample_size(self.format))
-            wf.setframerate(self.sample_rate)
-            wf.writeframes(b''.join(frames))
+    def saveAudio(self, filename: str, audio_buffer: List[np.ndarray]):
+        """Save recorded audio to a WAV file"""
+        with wave.open(filename, 'wb') as wf:
+            wf.setnchannels(self.config.channels)
+            wf.setsampwidth(self.audio.get_sample_size(self.config.format))
+            wf.setframerate(self.config.sampleRate)
 
-        print(f"Audio saved to {output_file}")
+            for chunk in audio_buffer:
+                wf.writeframes(chunk.tobytes())
 
-# Function for terminating audio recording
-    def close(self):
-        """Clean up audio interface resources."""
-        self.audio_interface.terminate()
-
-#
-if __name__ == "__main__":
-    processor = AudioProcessor()
-    processor.recordAudio(duration_seconds=5, output_file="raw_audio.wav")
-    processor.close()
+    def __del__(self):
+        """Cleanup resources"""
+        self.stopStream()
+        self.audio.terminate()
