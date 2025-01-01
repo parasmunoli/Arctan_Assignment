@@ -1,0 +1,8 @@
+streamlit
+numpy
+pyaudio
+wave
+dataclasses
+typing
+scipy
+plotly
