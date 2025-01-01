@@ -39,3 +39,14 @@ class AudioProcessor:
             wf.writeframes(b''.join(frames))
 
         print(f"Audio saved to {output_file}")
+
+# Function for terminating audio recording
+    def close(self):
+        """Clean up audio interface resources."""
+        self.audio_interface.terminate()
+
+#
+if __name__ == "__main__":
+    processor = AudioProcessor()
+    processor.recordAudio(duration_seconds=5, output_file="raw_audio.wav")
+    processor.close()
